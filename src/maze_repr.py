@@ -77,16 +77,30 @@ def solution_to_str(moves: tuple[str, ...]) -> str:
     return " ".join(moves)
 
 
-PROMPT_TEMPLATE = """\
-Solve this maze. Find a path from the entrance (>) on the left side to the exit (>) on the right side.
-
-Maze:
-{maze}
-
-Output ONLY your sequence of moves (u/d/l/r), space-separated.
-Moves:"""
+SYSTEM_PROMPT = (
+    "You solve mazes. Output ONLY moves as space-separated letters."
+    "\nExample output: d r r u d"
+)
 
 
-def to_prompt(maze: Maze) -> str:
-    """Build the full prompt for a maze."""
-    return PROMPT_TEMPLATE.format(maze=to_str(maze))
+def to_chat_messages(maze: Maze) -> list[dict[str, str]]:
+    """Build chat messages for a maze (system + user)."""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": to_str(maze)},
+    ]
+
+
+def to_prompt(maze: Maze, tokenizer=None) -> str:
+    """
+    Build the full prompt for a maze.
+
+    If a tokenizer is provided, applies the chat template. Otherwise returns
+    a plain text version (for display/testing).
+    """
+    messages = to_chat_messages(maze)
+    if tokenizer is not None:
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    return f"{SYSTEM_PROMPT}\n\n{to_str(maze)}"

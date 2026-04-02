@@ -108,14 +108,13 @@ class TestToPrompt:
         prompt = to_prompt(maze)
         assert to_str(maze) in prompt
 
-    def test_contains_instructions(self):
+    def test_contains_system_prompt(self):
         maze = generate(3, 3, seed=42)
         prompt = to_prompt(maze)
-        assert "entrance" in prompt.lower() or ">" in prompt
-        assert "exit" in prompt.lower() or ">" in prompt
-        assert "u/d/l/r" in prompt
+        assert "solve" in prompt.lower() or "maze" in prompt.lower()
 
-    def test_ends_with_moves_prompt(self):
+    def test_plain_text_without_tokenizer(self):
         maze = generate(3, 3, seed=42)
         prompt = to_prompt(maze)
-        assert prompt.rstrip().endswith("Moves:")
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
