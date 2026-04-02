@@ -48,13 +48,13 @@ class MazeRecord:
     walls: list[list[list[int]]]
 
     @staticmethod
-    def from_maze(maze: Maze) -> MazeRecord:
+    def from_maze(maze: Maze, algorithm: str = "wilson") -> MazeRecord:
         return MazeRecord(
             id=f"{maze.width}x{maze.height}_{maze.seed}",
             width=maze.width,
             height=maze.height,
             seed=maze.seed,
-            algorithm="wilson",
+            algorithm=algorithm,
             prompt=to_prompt(maze),
             maze_str=to_str(maze),
             solution_moves=solution_to_str(maze.solution_moves),
@@ -62,7 +62,7 @@ class MazeRecord:
             solution_path=[list(p) for p in maze.solution],
             entry=list(maze.entry),
             exit=list(maze.exit),
-            walls=[sorted([list(c) for c in w]) for w in maze.walls],
+            walls=sorted([sorted([list(c) for c in w]) for w in maze.walls]),
         )
 
     def to_maze(self) -> Maze:
@@ -212,7 +212,7 @@ class MazeDataset:
                     size_cfg.width, size_cfg.height,
                     seed=seed, algorithm=algo,
                 )
-                record = MazeRecord.from_maze(maze)
+                record = MazeRecord.from_maze(maze, algorithm=config.algorithm)
                 records.append(record)
                 if progress:
                     pbar.update(1)

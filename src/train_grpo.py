@@ -173,12 +173,14 @@ def grpo_step(
 
     def loss_fn(model):
         total_loss = mx.array(0.0)
+        n_valid = 0
         for i, comp_tokens in enumerate(completion_token_lists):
             if len(comp_tokens) == 0:
                 continue
             log_prob = compute_log_probs(model, prompt_tokens, comp_tokens)
             total_loss = total_loss - advantages[i] * log_prob
-        return total_loss / max(len(completion_token_lists), 1)
+            n_valid += 1
+        return total_loss / max(n_valid, 1)
 
     loss_and_grad = nn.value_and_grad(model, loss_fn)
     loss, grads = loss_and_grad(model)
@@ -295,8 +297,8 @@ def main():
                 f"time={step_time:.1f}s | "
                 f"elapsed={elapsed:.0f}s"
             )
-            best = max(metrics["completions"], key=lambda c: metrics["rewards"][metrics["completions"].index(c)])
-            best_idx = metrics["completions"].index(best)
+            best_idx = max(range(len(metrics["rewards"])), key=lambda i: metrics["rewards"][i])
+            best = metrics["completions"][best_idx]
             print(f"         best: [{metrics['rewards'][best_idx]:+.3f}] {best[:80]}")
             sys.stdout.flush()
 
