@@ -131,23 +131,58 @@ def compute_log_probs(model, prompt_tokens: list[int], completion_tokens: list[i
     return per_token_lp.sum()
 
 
+def save_ref_weights(model) -> dict:
+    """Save the initial LoRA weights as the reference policy."""
+    return {
+        name: mx.array(p)
+        for name, p in nn.utils.tree_flatten(model.trainable_parameters())
+    }
+
+
+def swap_weights(model, weights: dict):
+    """Temporarily swap in a set of weights (returns original for restoration)."""
+    original = {}
+    for name, p in nn.utils.tree_flatten(model.trainable_parameters()):
+        original[name] = mx.array(p)
+    model.load_weights(list(weights.items()), strict=False)
+    return original
+
+
+def compute_ref_log_probs(
+    model,
+    ref_weights: dict,
+    prompt_tokens: list[int],
+    completion_tokens: list[int],
+):
+    """Compute log probs under the reference (initial) model."""
+    current = swap_weights(model, ref_weights)
+    lp = compute_log_probs(model, prompt_tokens, completion_tokens)
+    result = mx.stop_gradient(lp)
+    mx.eval(result)
+    swap_weights(model, current)
+    return result
+
+
 def grpo_step(
     model,
     tokenizer,
     optimizer,
     prompt_text: str,
     maze_record: MazeRecord,
+    ref_weights: dict,
     num_generations: int,
     max_tokens: int,
     temperature: float,
+    beta: float = 0.04,
 ):
     """
     One GRPO training step:
       1. Generate G completions (no gradient)
       2. Score with reward function
-      3. Compute advantages
-      4. Differentiable loss via re-scoring
-      5. Gradient update
+      3. Compute reference log probs from frozen base policy
+      4. Compute advantages
+      5. Differentiable loss via re-scoring + KL penalty vs base
+      6. Gradient update
     """
     maze = maze_record.to_maze()
     prompt_tokens = tokenizer.encode(prompt_text)
@@ -155,6 +190,7 @@ def grpo_step(
     completions = []
     completion_token_lists = []
     rewards = []
+    ref_log_probs = []
 
     model.eval()
     for _ in range(num_generations):
@@ -164,6 +200,12 @@ def grpo_step(
         reward = compute_reward(text, maze)
         rewards.append(reward)
 
+        if len(tokens) > 0:
+            ref_lp = compute_ref_log_probs(model, ref_weights, prompt_tokens, tokens)
+            ref_log_probs.append(ref_lp)
+        else:
+            ref_log_probs.append(mx.array(0.0))
+
     rewards_arr = mx.array(rewards)
     mean_reward = mx.mean(rewards_arr)
     std_reward = mx.maximum(mx.std(rewards_arr), mx.array(1e-8))
@@ -172,15 +214,19 @@ def grpo_step(
     model.train()
 
     def loss_fn(model):
-        total_loss = mx.array(0.0)
+        pg_loss = mx.array(0.0)
+        kl_loss = mx.array(0.0)
         n_valid = 0
         for i, comp_tokens in enumerate(completion_token_lists):
             if len(comp_tokens) == 0:
                 continue
             log_prob = compute_log_probs(model, prompt_tokens, comp_tokens)
-            total_loss = total_loss - advantages[i] * log_prob
+            pg_loss = pg_loss - advantages[i] * log_prob
+            kl = log_prob - ref_log_probs[i]
+            kl_loss = kl_loss + kl
             n_valid += 1
-        return total_loss / max(n_valid, 1)
+        n = max(n_valid, 1)
+        return pg_loss / n + beta * kl_loss / n
 
     loss_and_grad = nn.value_and_grad(model, loss_fn)
     loss, grads = loss_and_grad(model)
@@ -222,6 +268,7 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--lr", type=float, default=5e-6)
+    parser.add_argument("--beta", type=float, default=0.04, help="KL penalty coefficient")
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--save-interval", type=int, default=50)
@@ -246,6 +293,7 @@ def main():
     else:
         parser.error("Specify --overfit or --dataset")
 
+    ref_weights = save_ref_weights(model)
     optimizer = optim.Adam(learning_rate=args.lr)
 
     print(f"\n  Max steps: {args.max_steps}")
@@ -253,6 +301,7 @@ def main():
     print(f"  Max completion tokens: {args.max_tokens}")
     print(f"  Temperature: {args.temperature}")
     print(f"  Learning rate: {args.lr}")
+    print(f"  KL penalty (beta): {args.beta}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -277,6 +326,8 @@ def main():
             optimizer,
             prompt,
             record,
+            ref_weights=ref_weights,
+            beta=args.beta,
             num_generations=args.num_generations,
             max_tokens=args.max_tokens,
             temperature=args.temperature,

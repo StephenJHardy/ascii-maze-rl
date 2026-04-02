@@ -509,16 +509,21 @@ argument. Our primary choice is informed by smoke testing three candidates:
 **Scale-up option:**
 - Qwen2.5-1.5B-Instruct — more capacity for harder mazes, same architecture
 
-### 5.3 Optional SFT Warm-Start
+### 5.3 SFT Warm-Start
 
-Phase 2 demonstrated that SFT is **not needed** for format compliance —
-the chat template with a tight system prompt and example output is
-sufficient. The model produces valid move sequences from step 1 of GRPO.
+Phase 2 showed SFT is not needed for **format compliance** — the chat
+template handles that. But Phase 3b showed SFT IS needed for **maze
+awareness** — the model must learn to condition its output on the maze
+structure before GRPO can refine the policy.
 
-SFT may still be useful for:
-- Teaching basic maze awareness before GRPO (faster convergence on harder
-  mazes)
-- Providing a starting checkpoint for workshops/demos
+Without SFT, GRPO collapses to a single fixed output regardless of the
+maze because the policy gradient gives contradictory signals across
+different maze structures.
+
+The SFT stage uses the same LoRA configuration as GRPO (same rank, same
+target modules) and trains on solved maze examples using the mlx-lm native
+trainer. The resulting LoRA adapter is then loaded as the starting point
+for GRPO training.
 
 ### 5.4 Training Configuration
 
@@ -686,22 +691,28 @@ ascii-maze-rl/
 ├── doc/
 │   └── plan.md                 # This document
 ├── src/
-│   ├── maze_gen.py             # Maze generation (DFS) + solving (BFS)
+│   ├── maze_gen.py             # Maze generation (Wilson's + DFS) + solving (BFS)
 │   ├── maze_repr.py            # Expanded grid rendering, prompt formatting
-│   ├── maze_verify.py          # Move parsing, path simulation, scoring
+│   ├── maze_verify.py          # Move parsing, path simulation
 │   ├── reward.py               # Reward function for GRPO
-│   ├── dataset_builder.py      # Generate all data splits
-│   ├── train_grpo.py           # GRPO training script
-│   ├── evaluate.py             # Evaluation script
-│   └── callbacks.py            # Training callbacks (eval, logging)
-├── data/                       # Generated datasets (gitignored)
+│   ├── maze_dataset.py         # MazeRecord/MazeDataset with JSONL serialization
+│   ├── maze_census.py          # Maze enumeration and distribution analysis
+│   ├── dataset_builder.py      # Generate base maze dataset from config
+│   ├── make_eval_splits.py     # Generate eval splits (disjoint seeds)
+│   ├── train_sft.py            # SFT LoRA fine-tuning (mlx-lm native trainer)
+│   ├── train_grpo.py           # Custom GRPO training loop (MLX)
+│   ├── evaluate.py             # Evaluation script (solve rate by size/difficulty)
+│   └── smoke_test.py           # Phase 0 framework validation
+├── data/                       # Generated datasets (gitignored, regenerable)
 ├── checkpoints/                # Model checkpoints (gitignored)
 ├── results/                    # Evaluation outputs
 ├── tests/
 │   ├── test_maze_gen.py
 │   ├── test_maze_repr.py
 │   ├── test_maze_verify.py
-│   └── test_reward.py
+│   ├── test_reward.py
+│   ├── test_maze_dataset.py
+│   └── test_evaluate.py
 ├── pyproject.toml
 └── README.md
 ```
@@ -827,29 +838,85 @@ steps (~97 seconds).**
    attention projections, lr=1e-5, temperature=1.0, 8 generations,
    20 max tokens.
 
-### Phase 3: Train/Val/Test Splits + Full Training (2–3 days)
+### Phase 3: Multi-Maze Training + Evaluation (2–3 days)
 
-- [ ] Generate train/val/test/mazebench splits from the base dataset
-- [ ] Implement `callbacks.py` for periodic evaluation
-- [ ] Run GRPO training with full config
-- [ ] Start with 3×3 only, add 4×4 and 5×5 once 3×3 converges
-- [ ] Target: >90% on 3×3, >60% on 5×5 by step 2000
+The overfit test proved the pipeline works on a single maze. The core
+question now: **does learning generalize across mazes?** We train on
+multiple mazes and evaluate on held-out ones.
 
-### Phase 4: Evaluation (1 day)
+At ~2s/step, 2,000 steps ≈ 67 minutes — fast enough to iterate on
+hyperparameters and curriculum within a day.
 
-- [ ] Implement `evaluate.py`
-- [ ] Run MazeBench evaluation on best checkpoint
-- [ ] Analyze results by size, difficulty, failure mode
-- [ ] Save and inspect sample outputs
+**3a: Evaluation tooling** ✅
+- [x] Implement `evaluate.py` — scores a checkpoint (base or LoRA) against
+      a maze dataset, reports solve rate by size and difficulty
+- [x] Implement `make_eval_splits.py` — generates eval sets with disjoint
+      seeds (eval_3x3: 192 mazes, eval_small: 200, eval_full: 200)
+- [x] 13 new tests (102 total, all passing)
+
+**3b: Multi-maze 3×3 training — SFT then GRPO**
+
+Pure GRPO on multiple mazes failed to converge (3 runs attempted). The
+model collapses to a single fixed output sequence regardless of the maze.
+Root cause: vanilla policy gradient gives contradictory gradients across
+different mazes — `r r d` is reinforced on mazes where it happens to work,
+then penalized on mazes where it doesn't, leading to oscillation.
+
+Adding a KL penalty (with proper frozen reference model) prevents garbage
+output but doesn't solve the conditioning problem — the model needs to learn
+to *read the maze* before GRPO can refine its solving strategy.
+
+**Approach: SFT warm-start then GRPO**
+
+1. SFT on solved examples teaches maze-awareness (read grid → output path)
+2. GRPO then refines the policy for accuracy and efficiency
+
+This mirrors the AlphaMaze approach (SFT to 86%, GRPO to 93%).
+
+- [x] Built `train_sft.py` — LoRA fine-tune using mlx-lm native trainer
+- [x] SFT on 1,000 solved 3×3 examples: 200 iterations, 2 minutes,
+      train loss 4.479 → 0.169, val loss 4.479 → 0.164
+- [x] **SFT eval on eval_3x3: 55.7% solve rate** (107/192), 100%
+      parseable, 0.76 mean progress. Model correctly conditions output
+      on maze structure (different mazes → different solutions).
+- [ ] Apply GRPO on top of SFT checkpoint
+- [ ] Evaluate SFT+GRPO — target: >80% solve rate on eval_3x3
+
+**3c: Scaling to larger mazes**
+- [ ] Add 4×4 mazes to SFT training data
+- [ ] Increase `max_tokens` to 32–40 (4×4 solutions are 6–14 moves)
+- [ ] SFT+GRPO on mixed 3×3/4×4, evaluate both sizes
+- [ ] Add 5×5 if 4×4 shows progress
+- [ ] Target: >90% on 3×3, >50% on 5×5
+
+**3d: Training dynamics**
+- [ ] Monitor reward distribution per step — watch for mode collapse
+- [ ] Compare SFT-only vs SFT+GRPO at each checkpoint
+- [ ] Track whether GRPO improves on SFT's weaknesses (long solutions,
+      complex topology)
+
+### Phase 4: Analysis + Visualization (1 day)
+
+- [ ] Build a maze viewer that shows a specific maze, its solution, the
+      model's generated solution, and the reward breakdown
+- [ ] Analyze failure modes: does the model fail on long solutions? Complex
+      topology? Specific wall patterns?
+- [ ] Compare performance across maze sizes — find the model's capacity
+      ceiling
+- [ ] Save representative successes and failures for the project writeup
 
 ### Phase 5: Extensions (optional)
 
-- [ ] Scale up to Qwen2.5-1.5B-Instruct
-- [ ] Curriculum learning — progressively add larger maze sizes
-- [ ] SFT warm-start LoRA for faster bootstrap
-- [ ] Alternative RL algorithms (REINFORCE, PPO)
-- [ ] Chain-of-thought prompting for harder mazes
-- [ ] Cloud GPU run with TRL + vLLM for faster iteration
+- [ ] Scale to Qwen2.5-1.5B-Instruct (same architecture, more capacity)
+- [ ] Curriculum learning — automated difficulty scheduling based on
+      current solve rate per size
+- [ ] KL penalty tuning — the current implementation doesn't use the
+      clipped ratio or KL penalty from full GRPO; adding these may
+      improve stability
+- [ ] Alternative RL algorithms (REINFORCE baseline, PPO with value head)
+- [ ] Cloud GPU run with TRL + vLLM for faster iteration at scale
+- [ ] Investigate Qwen3.5 for inference-only evaluation (compare base
+      model capabilities even though it can't be LoRA-trained on MLX)
 
 ---
 
@@ -884,38 +951,60 @@ cloud = [
 
 ## 10. Risks and Mitigations
 
+**Resolved risks** (from Phase 0–3b):
+
+| Risk | Resolution |
+|------|------------|
+| GRPO can't bootstrap format | ✅ Solved: chat template + system prompt gives immediate format compliance |
+| MLX-Tune GRPO has bugs | ✅ Solved: custom GRPO loop (~150 lines) |
+| Model outputs gibberish | ✅ Solved: tight system prompt + example; KL penalty prevents drift |
+| Training too slow on Mac | ✅ Solved: 4-bit quantized, ~2s/step |
+| Qwen3.5 CustomKernel issue | ✅ Worked around: using Qwen2.5-0.5B instead |
+| GRPO alone can't learn multi-maze | ✅ Diagnosed: needs SFT warm-start for maze conditioning |
+| Policy collapse without KL | ✅ Solved: proper frozen reference model KL penalty |
+
+**Active risks** (for Phase 3b+):
+
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| GRPO can't bootstrap from base instruct model | High | Phase 2 overfit test catches this early; SFT warm-start LoRA as fallback |
-| MLX-Tune GRPO has bugs | High | Custom GRPO loop in MLX (~100 lines); algorithm is simple |
-| Model outputs gibberish, not moves | High | Negative reward (-1.0) for unparseable output creates strong format-learning signal |
-| Larger mazes (7×7+) are too hard | Medium | Focus on 3×3–5×5 first; curriculum learning as extension |
-| Training too slow on Mac for iteration | Medium | 0.5B model + 32-token completions for trial; scale up only after pipeline validated |
-| 32GB insufficient for rollouts at scale | Low | Already using 0.5B + 4-bit; reduce G to 4 if needed |
+| GRPO doesn't improve on SFT baseline | High | SFT already at 55.7%; if GRPO can't push higher, try more SFT data or larger model |
+| Larger mazes (5×5+) get zero reward signal | Medium | Curriculum: train on 3×3 first, add sizes incrementally |
+| 0.5B model capacity ceiling | Medium | Track solve rate by size; scale to 1.5B if needed |
 
 ---
 
 ## 11. Open Questions
 
-1. **Can GRPO bootstrap from the base instruct model?** The Phase 2 overfit
-   test answers this directly. If the model can't memorize one 3×3 maze
-   within a few hundred steps, we need the SFT warm-start. The negative
-   reward for gibberish should help collapse the model into the right
-   action space quickly.
+**Answered:**
 
-2. **How many GRPO steps are needed?** AlphaMaze needed 1,600 steps *after*
-   full SFT. Without SFT (or with only a light warm-start), we likely need
-   more — budget is 3,000 steps, evaluate frequently to track the learning
-   curve.
+1. ~~Can GRPO bootstrap format compliance?~~ **Yes** — chat template +
+   system prompt with example. No SFT needed for format.
 
-3. **Does maze size require curriculum learning?** Training on all sizes
-   simultaneously may dilute the reward signal from small mazes where the
-   model can actually learn. Starting with 3×3 only and progressively adding
-   larger sizes may be more effective.
+2. ~~Can GRPO alone learn multi-maze solving?~~ **No** — without SFT, the
+   model collapses to a fixed output regardless of maze structure. The
+   policy gradient gives contradictory signals across mazes. SFT
+   warm-start is needed to teach maze-conditioned generation.
 
-4. **Where is the accuracy ceiling for 0.5B?** The 0.5B model has limited
-   capacity — it may plateau at smaller mazes. This determines when to
-   scale to 1.5B.
+3. ~~Does the simplified policy gradient need KL?~~ **Yes** — without KL
+   penalty the model drifts into garbage. With per-step KL (wrong
+   reference) it stays clean but doesn't learn. Proper frozen-reference
+   KL is implemented and prevents collapse.
+
+4. ~~Does SFT teach enough maze awareness?~~ **Yes** — 200 iterations on
+   1,000 examples reaches 55.7% solve rate on held-out 3×3 mazes. The
+   model conditions output on maze structure (different solutions for
+   different mazes). Failures are mostly on longer-path mazes.
+
+**Still open:**
+
+5. **Can GRPO improve on the 55.7% SFT baseline?** The SFT model makes
+   plausible mistakes (confuses similar mazes). GRPO's reward signal
+   should help distinguish these — but will it actually improve?
+
+6. **How does performance scale with maze size?** Where does 0.5B hit its
+   ceiling?
+
+7. **Is curriculum learning needed for mixed-size training?**
 
 ---
 
