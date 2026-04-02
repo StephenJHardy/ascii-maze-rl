@@ -781,14 +781,29 @@ of all spanning trees. Switched default generator to **Wilson's algorithm**
 - [x] Added `maze_census.py` for enumeration and distribution analysis
 - [x] All 72 existing tests still pass
 
+### Phase 1.2: Base Dataset ✅
+
+Built the data layer: generation, serialization, and loading. Pulled
+forward from Phase 3 since the dataset is needed before the overfit test.
+
+- [x] Implement `maze_dataset.py` — `MazeRecord`, `MazeDataset`,
+      `DatasetConfig` with JSONL serialization and filtering
+- [x] Implement `dataset_builder.py` — CLI generation from config
+- [x] Generate base dataset: 50K mazes (3×3–9×9) in 10s, 86.5 MB JSONL
+- [x] 17 new tests (89 total, all passing)
+
+**Storage decision:** regenerate, don't store. 86.5 MB is too large for
+git, but 10s generation from a deterministic config is fast enough. The
+config file goes in git, the materialized data stays gitignored.
+
 ### Phase 2: The Overfit Test (0.5–1 day)
 
 The critical go/no-go gate: can GRPO force the model to memorize a single
 3×3 maze?
 
 - [ ] Create a minimal dataset of **1 maze** (one 3×3 maze, repeated)
-- [ ] Wire up `train_grpo.py` with the trial config (0.5B, 32 tokens,
-      batch=1)
+- [ ] Wire up `train_grpo.py` with the trial config (Qwen3.5-0.8B,
+      32 tokens, batch=1)
 - [ ] Run GRPO for up to 500 steps on this single maze
 - [ ] **Success criterion:** model reliably outputs the correct move sequence
       for this one maze within a few hundred steps
@@ -800,12 +815,11 @@ The critical go/no-go gate: can GRPO force the model to memorize a single
 This test is fast (<30 min on the trial config) and tells us immediately
 whether the approach is viable.
 
-### Phase 3: Dataset + Full Training (2–3 days)
+### Phase 3: Train/Val/Test Splits + Full Training (2–3 days)
 
-- [ ] Implement `dataset_builder.py`
-- [ ] Generate train/val/test/mazebench splits
+- [ ] Generate train/val/test/mazebench splits from the base dataset
 - [ ] Implement `callbacks.py` for periodic evaluation
-- [ ] Run GRPO training with full config on the 0.5B model
+- [ ] Run GRPO training with full config
 - [ ] Start with 3×3 only, add 4×4 and 5×5 once 3×3 converges
 - [ ] Target: >90% on 3×3, >60% on 5×5 by step 2000
 
