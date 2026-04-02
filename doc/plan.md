@@ -454,26 +454,26 @@ GRPO. CPU-only rollout generation is too slow for iterative debugging. If we
 later move to a cloud GPU, TRL becomes the right choice — but for Mac
 development, it's not a practical option.
 
-**Memory estimate for Qwen2.5-0.5B with QLoRA (4-bit):**
+**Memory estimate for Qwen3.5-0.8B with 4-bit quantization + LoRA:**
 
 | Component                     | Estimate   |
 |-------------------------------|------------|
-| Model weights (4-bit)         | ~0.3 GB    |
-| LoRA adapters (r=16)          | ~20 MB     |
-| Optimizer states              | ~40 MB     |
-| Activations + KV cache        | ~1–2 GB    |
+| Model weights (4-bit)         | ~0.5 GB    |
+| LoRA adapters (r=16)          | ~30 MB     |
+| Optimizer states              | ~60 MB     |
+| Activations + KV cache        | ~1–3 GB    |
 | GRPO rollouts (8 generations) | ~2–4 GB    |
-| **Total**                     | **~4–7 GB** |
+| **Total**                     | **~4–8 GB** |
 
-Fits easily in 32GB unified memory with room to spare.
+Fits easily in 32GB unified memory. Rollout generation is the bottleneck
+(~3.2s for 8 × 32-token generations), not memory.
 
 ```python
 from mlx_tune import FastLanguageModel, GRPOTrainer, GRPOConfig
 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="Qwen/Qwen2.5-0.5B-Instruct",
+    "mlx-community/Qwen3.5-0.8B-MLX-4bit",
     max_seq_length=512,
-    load_in_4bit=True,
 )
 
 model = FastLanguageModel.get_peft_model(
@@ -499,17 +499,24 @@ value function head).
 
 ### 5.2 Base Model
 
-**Trial: Qwen2.5-0.5B-Instruct**
-- Fastest iteration cycle (~3× faster than 1.5B)
-- Fits comfortably in memory with generous rollout budget
-- Multiple successful GRPO fine-tunes exist on HuggingFace
-- Proves the RL math works before investing in longer training runs
+The model choice is configurable — all training scripts accept a model ID
+argument. Our primary choice is informed by smoke testing three candidates:
 
-**Scale-up: Qwen2.5-1.5B-Instruct**
-- Same family used by AlphaMaze (proven for maze tasks)
-- Better capacity for larger mazes and longer solution paths
-- Use once the pipeline is validated on 0.5B
-- Still fits in 32GB with 4-bit quantization
+| Model | Throughput | Maze output behaviour |
+|-------|-----------|----------------------|
+| Qwen2.5-0.5B-Instruct | 107 tok/s | Outputs moves immediately (mixed case) |
+| Qwen3-0.6B | 108 tok/s | Burns tokens on `<think>` block, never reaches moves |
+| **Qwen3.5-0.8B** | **60 tok/s** | **Outputs lowercase moves directly, cleanest tokenization** |
+
+**Primary: Qwen3.5-0.8B** (`mlx-community/Qwen3.5-0.8B-MLX-4bit`)
+- Already outputs lowercase space-separated directions without training
+- Cleanest tokenization: newlines are separate tokens (no merging)
+- Larger vocab (248K) with dedicated single-char tokens
+- ~60 tok/s throughput — 3.2s for 8 rollouts, viable for iteration
+
+**Alternatives for comparison:**
+- Qwen2.5-0.5B-Instruct — ~2× faster rollouts, good fallback if speed matters
+- Qwen2.5-1.5B-Instruct — more capacity for harder mazes, use after pipeline validated
 
 ### 5.3 Optional SFT Warm-Start
 
@@ -531,12 +538,11 @@ whether pure GRPO works first.
 Two configuration profiles — a fast trial config for validating the pipeline,
 and the full config for actual training runs.
 
-**Trial config** (for Phase 0 overfit test and early debugging):
+**Trial config** (for Phase 2 overfit test and early debugging):
 
 | Parameter              | Value                    |
 |------------------------|--------------------------|
-| Base model             | Qwen2.5-0.5B-Instruct   |
-| Quantization           | 4-bit (QLoRA)            |
+| Base model             | Qwen3.5-0.8B (4-bit)    |
 | LoRA rank (r)          | 16                       |
 | LoRA alpha             | 16                       |
 | LoRA targets           | q/k/v/o/gate/up/down_proj|
@@ -553,14 +559,14 @@ and the full config for actual training runs.
 | Eval interval          | 50 steps                 |
 
 The 32-token completion length is sufficient for 3×3 and 4×4 solutions (≤10
-moves). This keeps rollout generation fast during iteration.
+moves). At ~60 tok/s, each GRPO step takes roughly 3–6s (dominated by rollout
+generation). 500 steps ≈ 25–50 minutes.
 
 **Full config** (once pipeline is validated):
 
 | Parameter              | Value                    |
 |------------------------|--------------------------|
-| Base model             | Qwen2.5-0.5B-Instruct (or 1.5B) |
-| Quantization           | 4-bit (QLoRA)            |
+| Base model             | Qwen3.5-0.8B (4-bit)    |
 | LoRA rank (r)          | 16                       |
 | LoRA alpha             | 16                       |
 | LoRA targets           | q/k/v/o/gate/up/down_proj|
@@ -577,7 +583,9 @@ moves). This keeps rollout generation fast during iteration.
 | Eval interval          | 200 steps                |
 
 The 128-token completion length covers the longest expected solution (9×9
-optimal path ~50 moves = ~50 tokens) with headroom.
+optimal path ~50 moves = ~50 tokens) with headroom. Rollout generation is
+the primary bottleneck — the backward pass through LoRA adapters is
+comparatively cheap.
 
 ### 5.4 Swappable RL Algorithms
 
@@ -715,27 +723,61 @@ ascii-maze-rl/
 
 ## 8. Implementation Milestones
 
-### Phase 0: Smoke Test (0.5 day)
+### Phase 0: Smoke Test ✅
 
-Validate the framework before building the full pipeline.
+Validated MLX-Tune on target Mac with three model candidates.
 
-- [ ] Install MLX-Tune, verify it loads Qwen2.5-0.5B-Instruct on target Mac
-- [ ] Run basic text generation — confirm tokens/second throughput
-- [ ] Verify LoRA adapter creation works
-- [ ] Estimate wall-clock time for 8 rollouts of 32 tokens each
+- [x] Install MLX-Tune, verify it loads models on target Mac
+- [x] Run basic text generation — confirmed ~60 tok/s (Qwen3.5-0.8B)
+- [x] Verify LoRA adapter creation works
+- [x] Estimate wall-clock time: 3.2s for 8 × 32-token rollouts
 
-This catches framework-level blockers (install failures, MLX version
-incompatibilities, memory issues) before any maze code is written. If
-MLX-Tune fails here, we pivot to the custom GRPO loop early.
+Selected Qwen3.5-0.8B as primary model (best format compliance, clean
+tokenization). See `src/smoke_test.py` for the reusable test script.
 
-### Phase 1: Maze Infrastructure (1–2 days)
+### Phase 1: Maze Infrastructure ✅
 
-- [ ] Implement `maze_gen.py` — DFS generation, BFS solving
-- [ ] Implement `maze_repr.py` — expanded grid rendering, prompt formatting
-- [ ] Implement `maze_verify.py` — move parsing, path simulation
-- [ ] Implement `reward.py` — reward function (including negative rewards)
-- [ ] Write tests for all modules
-- [ ] Verify tokenization with Qwen2.5 tokenizer
+- [x] Implement `maze_gen.py` — DFS generation, BFS solving
+- [x] Implement `maze_repr.py` — expanded grid rendering, prompt formatting
+- [x] Implement `maze_verify.py` — move parsing, path simulation
+- [x] Implement `reward.py` — reward function (including negative rewards)
+- [x] Write tests for all modules (72 tests, all passing)
+- [x] Verify tokenization with Qwen3.5 tokenizer (1 token per grid position,
+      1 token per move, all sizes 3×3 through 9×9)
+
+### Phase 1.1: Maze Census & Generator Fix ✅
+
+Investigated how many structurally unique perfect mazes exist at each size,
+and discovered that the DFS backtracker only generates a tiny subset of them.
+
+**Spanning tree counts** (verified via Kirchhoff's matrix-tree theorem):
+
+| Size | Unique perfect mazes | DFS coverage (100K seeds) | Wilson coverage (100K seeds) |
+|------|---------------------|--------------------------|------------------------------|
+| 2×2  | 4                   | 4 (100%)                 | 4 (100%)                     |
+| 3×3  | 192                 | 14 (7.3%)                | 192 (100%)                   |
+| 4×4  | 100,352             | 322 (0.3%)               | 63,431 (63%)                 |
+| 5×5  | 557,568,000         | 23,291 (sample)          | 99,993 (sample)              |
+| 6×6  | 32.6 trillion       | —                        | —                            |
+
+DFS backtracker can only produce DFS-trees rooted at (0,0) — a strict subset
+of all spanning trees. Switched default generator to **Wilson's algorithm**
+(loop-erased random walks), which samples spanning trees uniformly.
+
+**Solution length distribution** (Wilson's / true distribution):
+
+- Most mazes have short solutions: 88.5% of 3×3 mazes have the minimum
+  4-move solution, 72.3% of 4×4 have minimum 6 moves.
+- DFS backtracker was biased toward long corridors, making solutions appear
+  more evenly distributed — this was misleading.
+- The true distribution is good for training: the model encounters many easy
+  wins for early reward signal, with hard mazes as rare challenges.
+
+**Changes made:**
+- [x] Added Wilson's algorithm to `maze_gen.py` (default generator)
+- [x] Kept DFS as an option via `Algorithm.DFS` enum
+- [x] Added `maze_census.py` for enumeration and distribution analysis
+- [x] All 72 existing tests still pass
 
 ### Phase 2: The Overfit Test (0.5–1 day)
 
