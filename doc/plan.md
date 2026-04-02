@@ -99,36 +99,42 @@ This tokenizes perfectly: each direction is exactly 1 token.
 
 ### 1.5 Prompt Template
 
-```
-Solve this maze. Find a path from the entrance (>) on the
-left side to the exit (>) on the right side.
+The prompt uses the model's **chat template** with a tight system prompt
+containing an example output. This was discovered in Phase 2 to be critical
+— without the chat template, the model produces chatty explanations instead
+of move sequences.
 
-Maze:
+**System prompt:**
+```
+You solve mazes. Output ONLY moves as space-separated letters.
+Example output: d r r u d
+```
+
+**User message:** just the maze grid, nothing else.
+
+**Full prompt (via chat template):**
+```
+<|im_start|>system
+You solve mazes. Output ONLY moves as space-separated letters.
+Example output: d r r u d<|im_end|>
+<|im_start|>user
 # # # # # # #
 > . . # . . #
 # # . # . # #
 # . . . . # #
 # . # # . . #
 # . . . # . >
-# # # # # # #
-
-Output ONLY your sequence of moves (u/d/l/r), space-separated.
-Moves:
+# # # # # # #<|im_end|>
+<|im_start|>assistant
 ```
 
-The model generates everything after `Moves:`. The prompt deliberately asks
-for **direct output only** — no chain-of-thought, no reasoning. This is
-important for two reasons:
-
-1. **Shorter rollouts** — CoT wastes generation budget on tokens that don't
-   contribute to the solution, directly impacting training speed.
-2. **Small model reliability** — sub-2B models tend to hallucinate coordinates
-   when asked to reason spatially (e.g., "I am at (2,2), moving right to
-   (3,4)..."). Forcing direct output lets GRPO optimize the model's internal
-   latent reasoning rather than an unreliable token-level narration.
+This design was validated in Phase 2: without the chat template and tight
+system prompt, the model echoed instructions, gave explanations, or produced
+comma/bracket-wrapped moves. With it, valid space-separated move sequences
+appear from the very first generation, giving GRPO immediate reward signal.
 
 CoT prompting is a potential Phase 5 extension for larger models or harder
-mazes, but the trial should validate the pipeline without it.
+mazes.
 
 ---
 
@@ -443,61 +449,40 @@ def simulate(moves: list[str], maze: dict) -> list[tuple[int, int]]:
 
 ## 5. Training Framework
 
-### 5.1 Framework: MLX-Tune
+### 5.1 Framework: Custom GRPO on MLX
 
-[MLX-Tune](https://github.com/ARahim3/mlx-tune) is the only viable choice for
-iterative RL development on Mac. It runs natively on Apple Silicon via the MLX
-framework, supports GRPO with LoRA/QLoRA, and has an Unsloth/TRL-compatible
-API.
+We use a **custom GRPO implementation** built directly on MLX primitives
+(`mlx_lm` for generation, `nn.value_and_grad` for training). MLX-Tune's
+GRPOTrainer was found to be non-functional — it computes the loss but never
+performs a gradient update (see Phase 2 notes).
 
 TRL (Hugging Face) is the most mature GRPO implementation, but its vLLM
-backend requires CUDA (unavailable on Mac) and MPS has known LLVM bugs with
-GRPO. CPU-only rollout generation is too slow for iterative debugging. If we
-later move to a cloud GPU, TRL becomes the right choice — but for Mac
-development, it's not a practical option.
+backend requires CUDA (unavailable on Mac). If we move to a cloud GPU, TRL
+becomes the right choice.
 
-**Memory estimate for Qwen3.5-0.8B with 4-bit quantization + LoRA:**
+**Key implementation details discovered during Phase 2:**
 
-| Component                     | Estimate   |
-|-------------------------------|------------|
-| Model weights (4-bit)         | ~0.5 GB    |
-| LoRA adapters (r=16)          | ~30 MB     |
-| Optimizer states              | ~60 MB     |
-| Activations + KV cache        | ~1–3 GB    |
-| GRPO rollouts (8 generations) | ~2–4 GB    |
-| **Total**                     | **~4–8 GB** |
+1. **LoRA freeze/unfreeze for quantized models:** After `model.freeze()` and
+   `lora_module.unfreeze()`, the quantized base weights inside each
+   `LoRALinear` are also unfrozen. This causes `QuantizedMatmul::vjp` to
+   fail. Fix: re-freeze `m.linear.freeze()` inside each LoRA module.
 
-Fits easily in 32GB unified memory. Rollout generation is the bottleneck
-(~3.2s for 8 × 32-token generations), not memory.
+2. **Qwen3.5 has CustomKernel ops without VJP:** The hybrid attention in
+   Qwen3.5 uses custom Metal kernels that don't support backpropagation.
+   Qwen2.5 uses standard attention and works fine with 4-bit LoRA training.
 
-```python
-from mlx_tune import FastLanguageModel, GRPOTrainer, GRPOConfig
+3. **Chat template is essential:** Without it, the model treats the prompt
+   as arbitrary text to continue rather than an instruction to follow,
+   producing chatty explanations instead of move sequences.
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    "mlx-community/Qwen3.5-0.8B-MLX-4bit",
-    max_seq_length=512,
-)
+The GRPO loop:
 
-model = FastLanguageModel.get_peft_model(
-    model, r=16,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                     "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
-)
-```
-
-**Escape hatch:** If MLX-Tune's GRPO path has bugs, we implement GRPO
-directly in MLX. The algorithm is simple enough:
-
-1. For each prompt batch, sample G completions from the current policy
+1. For each prompt, sample G completions from the current policy (no gradient)
 2. Score each completion with the reward function
 3. Compute group-relative advantages: `A_i = (r_i - mean(r)) / std(r)`
-4. Compute clipped surrogate loss: `L = -min(ratio * A, clip(ratio, 1±ε) * A)`
-5. Add KL penalty: `L += β * KL(π || π_ref)`
-6. Update via gradient descent
-
-This also enables swapping in REINFORCE (drop the clipping) or PPO (add a
-value function head).
+4. Re-score completions under current policy (differentiable forward pass)
+5. Policy gradient loss: `-mean(advantage * log_prob)`
+6. Update LoRA parameters via Adam
 
 ### 5.2 Base Model
 
@@ -510,30 +495,30 @@ argument. Our primary choice is informed by smoke testing three candidates:
 | Qwen3-0.6B | 108 tok/s | Burns tokens on `<think>` block, never reaches moves |
 | **Qwen3.5-0.8B** | **60 tok/s** | **Outputs lowercase moves directly, cleanest tokenization** |
 
-**Primary: Qwen3.5-0.8B** (`mlx-community/Qwen3.5-0.8B-MLX-4bit`)
-- Already outputs lowercase space-separated directions without training
-- Cleanest tokenization: newlines are separate tokens (no merging)
-- Larger vocab (248K) with dedicated single-char tokens
-- ~60 tok/s throughput — 3.2s for 8 rollouts, viable for iteration
+**Primary: Qwen2.5-0.5B-Instruct** (`mlx-community/Qwen2.5-0.5B-Instruct-4bit`)
+- 4-bit quantized LoRA training works (gradient step in 0.6s)
+- ~107 tok/s generation, ~2s per GRPO step (8 × 20 tokens)
+- Standard attention architecture — full VJP support for backpropagation
+- Proven in Phase 2 overfit test: converged in 50 steps
 
-**Alternatives for comparison:**
-- Qwen2.5-0.5B-Instruct — ~2× faster rollouts, good fallback if speed matters
-- Qwen2.5-1.5B-Instruct — more capacity for harder mazes, use after pipeline validated
+**Not viable for training (but fine for inference):**
+- Qwen3.5-0.8B — `CustomKernel` ops in hybrid attention lack VJP support,
+  blocking gradient computation. Works for generation/inference only.
+- Qwen3-0.6B — burns tokens on `<think>` blocks, never outputs moves
+
+**Scale-up option:**
+- Qwen2.5-1.5B-Instruct — more capacity for harder mazes, same architecture
 
 ### 5.3 Optional SFT Warm-Start
 
-If pure GRPO from the base instruct model proves too hard to bootstrap (the
-model can't find its way to outputting valid move sequences), we prepare a
-lightweight SFT LoRA on a small number of solved maze examples (~1,000). This
-teaches the model the output format and basic maze awareness, giving GRPO a
-head start.
+Phase 2 demonstrated that SFT is **not needed** for format compliance —
+the chat template with a tight system prompt and example output is
+sufficient. The model produces valid move sequences from step 1 of GRPO.
 
-This warm-start LoRA could also be useful as a teaching tool: provide
-participants with a model that knows the format but solves mazes poorly
-(~40% on 5×5), and let them use GRPO to push it further.
-
-The SFT warm-start is **not part of the initial trial** — Phase 0 tests
-whether pure GRPO works first.
+SFT may still be useful for:
+- Teaching basic maze awareness before GRPO (faster convergence on harder
+  mazes)
+- Providing a starting checkpoint for workshops/demos
 
 ### 5.4 Training Configuration
 
@@ -781,31 +766,72 @@ of all spanning trees. Switched default generator to **Wilson's algorithm**
 - [x] Added `maze_census.py` for enumeration and distribution analysis
 - [x] All 72 existing tests still pass
 
-### Phase 2: The Overfit Test (0.5–1 day)
+### Phase 1.2: Base Dataset ✅
 
-The critical go/no-go gate: can GRPO force the model to memorize a single
-3×3 maze?
+Built the data layer: generation, serialization, and loading. Pulled
+forward from Phase 3 since the dataset is needed before the overfit test.
 
-- [ ] Create a minimal dataset of **1 maze** (one 3×3 maze, repeated)
-- [ ] Wire up `train_grpo.py` with the trial config (0.5B, 32 tokens,
-      batch=1)
-- [ ] Run GRPO for up to 500 steps on this single maze
-- [ ] **Success criterion:** model reliably outputs the correct move sequence
-      for this one maze within a few hundred steps
-- [ ] If this fails: diagnose whether the problem is format (model doesn't
-      output moves at all) or navigation (outputs moves but wrong ones)
-- [ ] If format is the problem: build the SFT warm-start LoRA (Section 5.3)
-      and retry
+- [x] Implement `maze_dataset.py` — `MazeRecord`, `MazeDataset`,
+      `DatasetConfig` with JSONL serialization and filtering
+- [x] Implement `dataset_builder.py` — CLI generation from config
+- [x] Generate base dataset: 50K mazes (3×3–9×9) in 10s, 86.5 MB JSONL
+- [x] 17 new tests (89 total, all passing)
 
-This test is fast (<30 min on the trial config) and tells us immediately
-whether the approach is viable.
+**Storage decision:** regenerate, don't store. 86.5 MB is too large for
+git, but 10s generation from a deterministic config is fast enough. The
+config file goes in git, the materialized data stays gitignored.
 
-### Phase 3: Dataset + Full Training (2–3 days)
+### Phase 2: The Overfit Test ✅
 
-- [ ] Implement `dataset_builder.py`
-- [ ] Generate train/val/test/mazebench splits
+Can GRPO force the model to memorize a single 3×3 maze? **Yes — in 50
+steps (~97 seconds).**
+
+- [x] Implemented custom GRPO training loop (`train_grpo.py`) — MLX-Tune's
+      GRPOTrainer was found to be non-functional (computes loss but never
+      updates weights)
+- [x] Discovered and fixed LoRA freeze bug for quantized models
+      (`m.linear.freeze()` inside each LoRA module)
+- [x] Discovered Qwen3.5 has non-differentiable CustomKernel ops — switched
+      to Qwen2.5-0.5B-Instruct (4-bit) which has full VJP support
+- [x] Discovered chat template + tight system prompt eliminates chattiness
+      (the model outputs valid move sequences from step 1)
+- [x] **Overfit test passed:** perfect reward (1.0) on all 8 generations
+      from step 50 onward, stable through step 200+
+
+**Training curve (single 3×3 maze, solution: `d r r d`):**
+
+| Step | Mean Reward | Max Reward | Best Output |
+|------|-----------|-----------|-------------|
+| 1    | 0.015     | 0.745     | `d r r u d d r d r r u` (random valid moves) |
+| 10   | 0.251     | 0.707     | `d r r u d d r r u d d r r u d` (too long) |
+| 30   | 0.690     | 0.920     | `d r r d d` (almost right, 1 extra move) |
+| 50   | 0.922     | **1.000** | `d r r d` (perfect!) |
+| 60+  | **1.000** | **1.000** | `d r r d` (all 8 generations correct) |
+
+**Key learnings:**
+
+1. **Prompt engineering was more important than SFT warm-start.** The system
+   prompt `"You solve mazes. Output ONLY moves as space-separated letters.
+   Example output: d r r u d"` plus the chat template eliminated format
+   compliance issues entirely. The model produced valid move sequences from
+   step 1, giving GRPO meaningful reward signal immediately.
+
+2. **MLX-Tune's GRPO is broken** but MLX itself works perfectly for custom
+   RL. The core primitives (`mlx_lm.generate`, `nn.value_and_grad`,
+   `optim.Adam`) are solid — we just needed ~150 lines of custom code.
+
+3. **4-bit quantized training works** with the freeze fix. ~2s per GRPO step
+   (8 generations × 20 tokens + gradient update). No need for bf16.
+
+4. **Config that worked:** Qwen2.5-0.5B-Instruct-4bit, LoRA r=16 on
+   attention projections, lr=1e-5, temperature=1.0, 8 generations,
+   20 max tokens.
+
+### Phase 3: Train/Val/Test Splits + Full Training (2–3 days)
+
+- [ ] Generate train/val/test/mazebench splits from the base dataset
 - [ ] Implement `callbacks.py` for periodic evaluation
-- [ ] Run GRPO training with full config on the 0.5B model
+- [ ] Run GRPO training with full config
 - [ ] Start with 3×3 only, add 4×4 and 5×5 once 3×3 converges
 - [ ] Target: >90% on 3×3, >60% on 5×5 by step 2000
 
