@@ -1,0 +1,38 @@
+[project]
+name = "ascii-maze-rl"
+version = "0.1.0"
+description = "Training a small LLM to solve ASCII mazes via GRPO"
+requires-python = ">=3.12"
+dependencies = [
+    "mlx-tune",
+    "datasets",
+    "transformers",
+    "wandb",
+    "numpy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+cloud = [
+    "trl>=1.0",
+    "accelerate",
+    "peft",
+    "bitsandbytes",
+    "vllm",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.11.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
