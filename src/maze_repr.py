@@ -28,8 +28,9 @@ def to_grid(maze: Maze) -> list[list[str]]:
     Render a Maze as a 2D character grid.
 
     Returns a list of rows, each a list of single characters.
-    Grid dimensions: (2*height+1) rows × (2*width+1) cols,
-    plus the entry/exit markers which extend the first and last data rows.
+    Grid dimensions: (2*height+1) rows × (2*width+1) cols.
+    Entry and exit markers overwrite the boundary wall cells on the
+    leftmost and rightmost columns.
     """
     h, w = maze.height, maze.width
     rows = 2 * h + 1

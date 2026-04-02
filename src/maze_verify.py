@@ -38,9 +38,9 @@ def extract_moves(text: str) -> list[str] | None:
     if matches:
         return matches[-1].split()
 
-    m = _SINGLE_MOVE_PATTERN.search(text)
-    if m:
-        return [m.group(1)]
+    single_matches = _SINGLE_MOVE_PATTERN.findall(text)
+    if single_matches:
+        return [single_matches[-1]]
 
     return None
 
@@ -64,6 +64,8 @@ def simulate(moves: list[str], maze: Maze) -> list[tuple[int, int]]:
             break
         pos = next_pos
         path.append(pos)
+        if pos == maze.exit:
+            break
     return path
 
 

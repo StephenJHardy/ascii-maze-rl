@@ -34,11 +34,15 @@ class TestComputeReward:
         reward = compute_reward(moves_str, maze_5x5)
         assert reward == pytest.approx(1.0)
 
-    def test_solved_but_longer_path(self, maze_3x3):
+    def test_solved_with_extra_moves_still_solved(self, maze_3x3):
+        """Extra moves after reaching the exit still count as solved, but with
+        reduced efficiency (the model wasted tokens)."""
         optimal = solution_to_str(maze_3x3.solution_moves)
-        padded = optimal + " " + optimal  # double the moves (won't work if it hits walls)
-        reward = compute_reward(optimal, maze_3x3)
-        assert reward == pytest.approx(1.0)
+        with_extras = optimal + " u u u u"
+        reward = compute_reward(with_extras, maze_3x3)
+        optimal_reward = compute_reward(optimal, maze_3x3)
+        assert reward >= 0.6  # solved threshold
+        assert reward < optimal_reward  # but penalized for extra moves
 
     def test_partial_path_gets_partial_credit(self, maze_5x5):
         moves = list(maze_5x5.solution_moves)

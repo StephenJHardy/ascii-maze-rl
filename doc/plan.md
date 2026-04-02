@@ -136,16 +136,18 @@ mazes, but the trial should validate the pipeline without it.
 
 ### 2.1 Algorithm
 
-We generate mazes using **randomized depth-first search** (recursive
-backtracker). This is the standard algorithm that:
+We generate mazes using **Wilson's algorithm**, which produces a **uniform
+random spanning tree** of the grid graph via loop-erased random walks. This
+means every possible perfect maze is equally likely to be generated, giving
+full coverage of the maze space (see Phase 1.1 census results).
 
-- Guarantees a unique path between any two cells
-- Produces mazes with long winding corridors (good training signal)
-- Is simple to implement (~50 lines of Python)
+Every generated maze is a perfect maze — exactly one path between any two
+cells.
 
-The algorithm starts from a random cell, carves passages by randomly choosing
-unvisited neighbors, and backtracks when stuck. Every generated maze is a
-perfect maze (exactly one path between any two points).
+As an alternative, **randomized DFS** (recursive backtracker) is available
+via the `Algorithm.DFS` option. DFS produces mazes with characteristically
+long corridors but can only generate a small subset of all possible mazes
+(e.g. 14 of 192 for 3×3).
 
 ### 2.2 Solving
 

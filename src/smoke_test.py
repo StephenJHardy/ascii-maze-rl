@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "mlx-tune",
-# ]
-# ///
 """
 Phase 0 Smoke Test: Verify MLX-Tune works on this Mac.
 

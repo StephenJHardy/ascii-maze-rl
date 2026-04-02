@@ -13,17 +13,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "ruff",
-]
 cloud = [
     "trl>=1.0",
     "accelerate",
     "peft",
     "bitsandbytes",
     "vllm",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.11.0",
 ]
 
 [tool.ruff]
@@ -35,8 +36,3 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
