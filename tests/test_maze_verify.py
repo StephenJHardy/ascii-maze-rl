@@ -72,7 +72,8 @@ class TestSimulate:
         for move_char, (dr, dc) in [("u", (-1, 0)), ("d", (1, 0)), ("l", (0, -1)), ("r", (0, 1))]:
             next_pos = (maze.entry[0] + dr, maze.entry[1] + dc)
             wall = frozenset({maze.entry, next_pos})
-            if wall in walls or not (0 <= next_pos[0] < maze.height and 0 <= next_pos[1] < maze.width):
+            in_bounds = 0 <= next_pos[0] < maze.height and 0 <= next_pos[1] < maze.width
+            if wall in walls or not in_bounds:
                 blocked = move_char
                 break
         if blocked:
