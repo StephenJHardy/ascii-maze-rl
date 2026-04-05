@@ -52,8 +52,8 @@ def find_layers(model):
     raise ValueError("Cannot find transformer layers in model")
 
 
-def setup_model(model_id: str, lora_rank: int = 16):
-    """Load model, apply LoRA, freeze base weights."""
+def setup_model(model_id: str, lora_rank: int = 16, adapter_path: str | None = None):
+    """Load model, apply LoRA, freeze base weights, optionally load SFT adapters."""
     model, tokenizer = load(model_id)
 
     num_layers = len(find_layers(model))
@@ -73,6 +73,16 @@ def setup_model(model_id: str, lora_rank: int = 16):
             ],
         },
     )
+
+    if adapter_path is not None:
+        adapter_dir = Path(adapter_path)
+        for name in ["adapters.safetensors", "adapters.npz"]:
+            candidate = adapter_dir / name
+            if candidate.exists():
+                weights = mx.load(str(candidate))
+                model.load_weights(list(weights.items()), strict=False)
+                print(f"  Loaded SFT adapters from {candidate}")
+                break
 
     model.freeze()
     for _, m in model.named_modules():
@@ -261,6 +271,7 @@ def make_overfit_dataset(tokenizer):
 def main():
     parser = argparse.ArgumentParser(description="GRPO maze training")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
+    parser.add_argument("--adapters", type=str, default=None, help="Path to SFT adapter checkpoint to warm-start from")
     parser.add_argument("--overfit", action="store_true", help="Single-maze overfit test")
     parser.add_argument("--dataset", type=str, default=None, help="Path to dataset JSONL")
     parser.add_argument("--max-steps", type=int, default=200)
@@ -281,7 +292,9 @@ def main():
 
     print(f"\n  Model: {args.model}")
     print(f"  LoRA rank: {args.lora_rank}")
-    model, tokenizer = setup_model(args.model, lora_rank=args.lora_rank)
+    if args.adapters:
+        print(f"  Warm-start: {args.adapters}")
+    model, tokenizer = setup_model(args.model, lora_rank=args.lora_rank, adapter_path=args.adapters)
 
     if args.overfit:
         records, prompts = make_overfit_dataset(tokenizer)
