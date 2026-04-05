@@ -26,10 +26,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import mlx.core as mx
-import mlx.nn as nn
 from mlx_lm import load
-from mlx_lm.sample_utils import make_sampler
-from mlx_lm.tuner.utils import LoRALinear, linear_to_lora_layers
+from mlx_lm.tuner.utils import linear_to_lora_layers
 
 from src.maze_dataset import MazeDataset, MazeRecord
 from src.maze_repr import to_prompt
@@ -229,7 +227,7 @@ def print_summary(summary: EvalSummary):
     print(f"  Mean progress:{summary.mean_progress:.3f}")
 
     if summary.by_size:
-        print(f"\n  By size:")
+        print("\n  By size:")
         for size, stats in sorted(summary.by_size.items()):
             print(
                 f"    {size:5s}: {stats['solved']:3d}/{stats['count']:3d} "
@@ -239,7 +237,7 @@ def print_summary(summary: EvalSummary):
             )
 
     if summary.by_difficulty:
-        print(f"\n  By difficulty:")
+        print("\n  By difficulty:")
         for diff in ["easy", "medium", "hard"]:
             if diff in summary.by_difficulty:
                 stats = summary.by_difficulty[diff]
@@ -287,12 +285,17 @@ def evaluate_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Evaluate maze solver")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
-    parser.add_argument("--adapters", type=str, default=None, help="Path to LoRA adapter checkpoint")
-    parser.add_argument("--dataset", type=str, required=True, help="Path to evaluation JSONL")
-    parser.add_argument("--output", type=str, default=None, help="Save results JSON to this path")
+    parser.add_argument("--adapters", type=str, default=None,
+                        help="Path to LoRA adapter checkpoint")
+    parser.add_argument("--dataset", type=str, required=True,
+                        help="Path to evaluation JSONL")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Save results JSON to this path")
     parser.add_argument("--max-tokens", type=int, default=32)
-    parser.add_argument("--temperature", type=float, default=0.0, help="0.0 = greedy (deterministic)")
-    parser.add_argument("--samples", type=int, default=1, help="Generations per maze (take best)")
+    parser.add_argument("--temperature", type=float, default=0.0,
+                        help="0.0 = greedy (deterministic)")
+    parser.add_argument("--samples", type=int, default=1,
+                        help="Generations per maze (take best)")
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--limit", type=int, default=None, help="Evaluate only first N mazes")
     parser.add_argument("--verbose", action="store_true")

@@ -3,9 +3,7 @@
 import pytest
 
 from src.evaluate import EvalResult, EvalSummary, summarize_results
-from src.maze_dataset import MazeDataset, MazeRecord, DatasetConfig, SizeConfig
-from src.maze_gen import generate
-from src.maze_repr import solution_to_str
+from src.maze_dataset import DatasetConfig, MazeDataset, SizeConfig
 
 
 @pytest.fixture
@@ -60,7 +58,9 @@ class TestEvalResult:
         assert r.reward == 1.0
 
     def test_failed_result(self):
-        r = make_eval_result(solved=False, reward=-1.0, moves_parsed=[], valid_steps=0, progress=0.0)
+        r = make_eval_result(
+            solved=False, reward=-1.0, moves_parsed=[], valid_steps=0, progress=0.0,
+        )
         assert r.solved is False
         assert r.moves_parsed == []
 

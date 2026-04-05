@@ -62,7 +62,9 @@ def is_spanning_tree(
     return len(visited) == num_cells
 
 
-def enumerate_mazes(width: int, height: int) -> list[tuple[frozenset[frozenset[tuple[int, int]]], int]]:
+def enumerate_mazes(
+    width: int, height: int,
+) -> list[tuple[frozenset[frozenset[tuple[int, int]]], int]]:
     """
     Exhaustively enumerate all perfect mazes for a grid.
 
@@ -139,7 +141,7 @@ def main():
 
         print(f"--- {width}×{height} (exhaustive, {elapsed:.1f}s) ---")
         print(f"  Total unique mazes: {len(results)}")
-        print(f"  Solution length distribution:")
+        print("  Solution length distribution:")
         for length in sorted(length_dist):
             count = length_dist[length]
             pct = 100 * count / len(results)
@@ -162,8 +164,8 @@ def main():
         if total_unique < num_samples:
             print(f"  (exhausted unique mazes — total population ≈ {total_unique})")
         else:
-            print(f"  (sampling — true population is larger)")
-        print(f"  Solution length distribution:")
+            print("  (sampling — true population is larger)")
+        print("  Solution length distribution:")
         for length in sorted(length_dist):
             count = length_dist[length]
             pct = 100 * count / total_unique

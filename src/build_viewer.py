@@ -22,8 +22,7 @@ import json
 from pathlib import Path
 
 from src.maze_dataset import MazeDataset
-from src.maze_repr import to_str
-from src.maze_verify import DIRECTIONS, extract_moves, simulate
+from src.maze_verify import simulate
 
 
 def build_viewer_data(results_path: str, dataset_path: str) -> list[dict]:
@@ -43,21 +42,8 @@ def build_viewer_data(results_path: str, dataset_path: str) -> list[dict]:
         maze = record.to_maze()
 
         model_moves = result["moves_parsed"] or []
-        model_path = []
-        pos = maze.entry
-        model_path.append(list(pos))
-        for move in model_moves:
-            delta = DIRECTIONS.get(move)
-            if delta is None:
-                break
-            next_pos = (pos[0] + delta[0], pos[1] + delta[1])
-            wall = frozenset({pos, next_pos})
-            if wall in maze.walls or not (0 <= next_pos[0] < maze.height and 0 <= next_pos[1] < maze.width):
-                break
-            pos = next_pos
-            model_path.append(list(pos))
-            if pos == maze.exit:
-                break
+        model_path_tuples = simulate(model_moves, maze)
+        model_path = [list(p) for p in model_path_tuples]
 
         correct_path = [list(p) for p in maze.solution]
         correct_moves = list(maze.solution_moves)
@@ -368,7 +354,8 @@ def main():
     entries = build_viewer_data(args.results, args.dataset)
     print(f"Built {len(entries)} viewer entries")
 
-    html = HTML_TEMPLATE.replace("__DATA_PLACEHOLDER__", json.dumps(entries))
+    serialized = json.dumps(entries).replace("</", "<\\/")
+    html = HTML_TEMPLATE.replace("__DATA_PLACEHOLDER__", serialized)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

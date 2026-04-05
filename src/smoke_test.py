@@ -35,7 +35,7 @@ def test_load_model(model_id: str):
 
     print(f"  Loaded in {elapsed:.1f}s")
     print(f"  Tokenizer vocab size: {tokenizer.vocab_size}")
-    print(f"  PASS\n")
+    print("  PASS\n")
     return model, tokenizer
 
 
@@ -60,7 +60,7 @@ def test_lora_adapter(model):
     elapsed = time.perf_counter() - t0
 
     print(f"  LoRA adapter created in {elapsed:.1f}s")
-    print(f"  PASS\n")
+    print("  PASS\n")
     return model
 
 
@@ -96,7 +96,7 @@ def test_single_generation(model, tokenizer):
     print(f"  Response: {response}")
     print(f"  Tokens: {len(response_tokens)}")
     print(f"  Time: {elapsed:.2f}s ({tps:.1f} tokens/sec)")
-    print(f"  PASS\n")
+    print("  PASS\n")
     return tps
 
 
@@ -148,10 +148,10 @@ def test_batch_generation(model, tokenizer):
     print(f"  Per generation: {elapsed / 8:.2f}s")
     print(f"  Total tokens: {total_tokens}")
     print(f"  Throughput: {tps:.1f} tokens/sec")
-    print(f"\n  Sample responses (first 3):")
+    print("\n  Sample responses (first 3):")
     for i, r in enumerate(responses[:3]):
         print(f"    [{i}] {r[:80]}{'...' if len(r) > 80 else ''}")
-    print(f"  PASS\n")
+    print("  PASS\n")
 
     return elapsed
 
@@ -180,7 +180,7 @@ def main():
     print(f"  Generation speed: ~{tps:.0f} tokens/sec")
     print(f"  8 × 32-token rollouts: {batch_time:.1f}s")
     print(f"  Estimated GRPO step time: ~{batch_time * 2:.0f}s")
-    print(f"    (rollouts + backward pass)")
+    print("    (rollouts + backward pass)")
     print()
 
     if batch_time < 60:

@@ -18,7 +18,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx_lm import load
@@ -27,7 +26,7 @@ from mlx_lm.tuner.trainer import TrainingArgs, train
 from mlx_lm.tuner.utils import LoRALinear, linear_to_lora_layers
 
 from src.maze_dataset import MazeDataset
-from src.maze_repr import SYSTEM_PROMPT, solution_to_str, to_str
+from src.maze_repr import SYSTEM_PROMPT
 from src.train_grpo import DEFAULT_MODEL, find_layers
 
 
@@ -143,7 +142,7 @@ def main():
         args=training_args,
     )
 
-    print(f"\nSFT training complete!")
+    print("\nSFT training complete!")
     print(f"Adapters saved to: {output_dir}")
 
 

@@ -76,13 +76,20 @@ def setup_model(model_id: str, lora_rank: int = 16, adapter_path: str | None = N
 
     if adapter_path is not None:
         adapter_dir = Path(adapter_path)
+        loaded = False
         for name in ["adapters.safetensors", "adapters.npz"]:
             candidate = adapter_dir / name
             if candidate.exists():
                 weights = mx.load(str(candidate))
                 model.load_weights(list(weights.items()), strict=False)
                 print(f"  Loaded SFT adapters from {candidate}")
+                loaded = True
                 break
+        if not loaded:
+            raise FileNotFoundError(
+                f"No adapter file found in {adapter_dir}. "
+                f"Expected adapters.safetensors or adapters.npz"
+            )
 
     model.freeze()
     for _, m in model.named_modules():
@@ -260,9 +267,9 @@ def make_overfit_dataset(tokenizer):
     record = MazeRecord.from_maze(maze)
     prompt = to_prompt(maze, tokenizer=tokenizer)
     solution = solution_to_str(maze.solution_moves)
-    print(f"\n  Overfit maze (3×3, seed=42):")
+    print("\n  Overfit maze (3×3, seed=42):")
     print(f"  Solution: {solution} ({len(maze.solution_moves)} moves)")
-    print(f"  Maze:")
+    print("  Maze:")
     for line in to_str(maze).split("\n"):
         print(f"    {line}")
     return [record], [prompt]
@@ -271,7 +278,8 @@ def make_overfit_dataset(tokenizer):
 def main():
     parser = argparse.ArgumentParser(description="GRPO maze training")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
-    parser.add_argument("--adapters", type=str, default=None, help="Path to SFT adapter checkpoint to warm-start from")
+    parser.add_argument("--adapters", type=str, default=None,
+                        help="Path to SFT adapter checkpoint to warm-start from")
     parser.add_argument("--overfit", action="store_true", help="Single-maze overfit test")
     parser.add_argument("--dataset", type=str, default=None, help="Path to dataset JSONL")
     parser.add_argument("--max-steps", type=int, default=200)
