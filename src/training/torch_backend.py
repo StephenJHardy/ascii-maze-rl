@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -151,6 +152,43 @@ class TorchBackend:
             )
         return Dataset.from_list(rows)
 
+    def _make_training_args(
+        self,
+        output_dir: Path,
+        config: SFTConfig,
+        has_eval: bool,
+    ) -> TrainingArguments:
+        """Build TrainingArguments compatibly across transformers versions."""
+        kwargs = {
+            "output_dir": str(output_dir / "workdir"),
+            "num_train_epochs": config.epochs if config.epochs is not None else 1.0,
+            "max_steps": config.iters if config.epochs is None else -1,
+            "per_device_train_batch_size": config.batch_size,
+            "per_device_eval_batch_size": config.batch_size,
+            "learning_rate": config.lr,
+            "weight_decay": 0.0,
+            "logging_steps": 10,
+            "save_strategy": "no",
+            "report_to": [],
+            "remove_unused_columns": False,
+            "fp16": self.device == "cuda",
+            "gradient_checkpointing": self.device == "cuda",
+        }
+
+        if has_eval:
+            strategy_name = "evaluation_strategy"
+            if strategy_name not in inspect.signature(TrainingArguments.__init__).parameters:
+                strategy_name = "eval_strategy"
+            kwargs[strategy_name] = "steps" if config.epochs is None else "epoch"
+            kwargs["eval_steps"] = 50 if config.epochs is None else None
+        else:
+            strategy_name = "evaluation_strategy"
+            if strategy_name not in inspect.signature(TrainingArguments.__init__).parameters:
+                strategy_name = "eval_strategy"
+            kwargs[strategy_name] = "no"
+
+        return TrainingArguments(**kwargs)
+
     def train_sft(self, config: SFTConfig) -> Path:
         model_id = resolve_model_for_backend(config.model, self.name)
         tokenizer = self._load_tokenizer(model_id)
@@ -170,22 +208,10 @@ class TorchBackend:
         output_dir = Path(config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        training_args = TrainingArguments(
-            output_dir=str(output_dir / "workdir"),
-            num_train_epochs=config.epochs if config.epochs is not None else 1.0,
-            max_steps=config.iters if config.epochs is None else -1,
-            per_device_train_batch_size=config.batch_size,
-            per_device_eval_batch_size=config.batch_size,
-            learning_rate=config.lr,
-            weight_decay=0.0,
-            logging_steps=10,
-            evaluation_strategy="steps" if val_ds is not None and config.epochs is None else "no",
-            eval_steps=50 if val_ds is not None and config.epochs is None else None,
-            save_strategy="no",
-            report_to=[],
-            remove_unused_columns=False,
-            fp16=self.device == "cuda",
-            gradient_checkpointing=self.device == "cuda",
+        training_args = self._make_training_args(
+            output_dir=output_dir,
+            config=config,
+            has_eval=val_ds is not None,
         )
 
         trainer = Trainer(
