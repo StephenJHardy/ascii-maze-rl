@@ -25,15 +25,11 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-import mlx.core as mx
-from mlx_lm import load
-from mlx_lm.tuner.utils import linear_to_lora_layers
-
 from src.maze_dataset import MazeDataset, MazeRecord
-from src.maze_repr import to_prompt
 from src.maze_verify import extract_moves, manhattan_progress, reached_exit, simulate
 from src.reward import compute_reward
-from src.train_grpo import DEFAULT_MODEL, find_layers, generate_completion
+
+DEFAULT_MODEL = "mlx-community/Qwen2.5-0.5B-Instruct-4bit"
 
 
 @dataclass
@@ -79,6 +75,12 @@ def load_model_for_eval(
     lora_rank: int = 16,
 ):
     """Load a model for evaluation, optionally with LoRA adapters."""
+    import mlx.core as mx
+    from mlx_lm import load
+    from mlx_lm.tuner.utils import linear_to_lora_layers
+
+    from src.train_grpo import find_layers
+
     model, tokenizer = load(model_id)
 
     if adapter_path is not None:
@@ -133,6 +135,9 @@ def evaluate_maze(
     If num_samples > 1, generates multiple completions and takes the best.
     Uses temperature=0.0 (greedy) by default for deterministic evaluation.
     """
+    from src.maze_repr import to_prompt
+    from src.train_grpo import generate_completion
+
     maze = record.to_maze()
     prompt = to_prompt(maze, tokenizer=tokenizer)
 
@@ -164,6 +169,65 @@ def evaluate_maze(
         valid_steps=valid_steps,
         progress=max(progress, 0.0),
     )
+
+
+def evaluate_policy_records(
+    policy,
+    records: list[MazeRecord],
+    max_tokens: int = 32,
+    temperature: float = 0.0,
+    num_samples: int = 1,
+    verbose: bool = False,
+) -> tuple[list[EvalResult], EvalSummary]:
+    """Evaluate any policy object that implements generate_completion()."""
+    results = []
+    for i, record in enumerate(records):
+        maze = record.to_maze()
+        best_reward = -2.0
+        best_completion = ""
+        best_moves = None
+
+        for _ in range(num_samples):
+            completion = policy.generate_completion(
+                record,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            reward = compute_reward(completion, maze)
+            if reward > best_reward:
+                best_reward = reward
+                best_completion = completion
+                best_moves = extract_moves(completion)
+
+        path = simulate(best_moves or [], maze)
+        valid_steps = len(path) - 1
+        progress = manhattan_progress(path[-1], maze.exit, maze.entry)
+
+        results.append(
+            EvalResult(
+                maze_id=record.id,
+                width=record.width,
+                height=record.height,
+                solution_length=record.solution_length,
+                completion=best_completion,
+                moves_parsed=best_moves,
+                reward=best_reward,
+                solved=reached_exit(path, maze),
+                valid_steps=valid_steps,
+                progress=max(progress, 0.0),
+            )
+        )
+
+        if verbose and (i + 1) % 10 == 0:
+            solved_so_far = sum(1 for r in results if r.solved)
+            print(
+                f"  [{i+1}/{len(records)}] "
+                f"solved={solved_so_far}/{i+1} "
+                f"({100*solved_so_far/(i+1):.0f}%)",
+            )
+            sys.stdout.flush()
+
+    return results, summarize_results(results)
 
 
 def summarize_results(results: list[EvalResult]) -> EvalSummary:

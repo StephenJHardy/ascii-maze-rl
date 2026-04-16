@@ -184,6 +184,7 @@ cloud = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
     { name = "peft" },
+    { name = "torch" },
     { name = "trl" },
     { name = "vllm" },
 ]
@@ -202,6 +203,7 @@ requires-dist = [
     { name = "mlx-tune" },
     { name = "numpy" },
     { name = "peft", marker = "extra == 'cloud'" },
+    { name = "torch", marker = "extra == 'cloud'" },
     { name = "tqdm" },
     { name = "transformers" },
     { name = "trl", marker = "extra == 'cloud'", specifier = ">=1.0" },

@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = [
+    "torch",
     "trl>=1.0",
     "accelerate",
     "peft",

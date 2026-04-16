@@ -6,6 +6,26 @@ Policy Optimization). Runs entirely on a Mac laptop with Apple Silicon.
 See [doc/plan.md](doc/plan.md) for the full project plan, methodology, and
 results.
 
+## Colab Walkthrough
+
+For a Google Colab-friendly end-to-end walkthrough of the SFT → RL sequence,
+see [notebooks/maze_sft_grpo_colab.ipynb](notebooks/maze_sft_grpo_colab.ipynb).
+It reuses the repo's maze generation, prompt, reward, and evaluation logic,
+but swaps the Apple-Silicon-only MLX trainers for a Colab-compatible
+PyTorch/LoRA flow.
+
+The notebook now calls the shared Python training API in `src.training`
+instead of embedding trainer internals in notebook cells. That API chooses
+`MLX` on Apple Silicon when available and otherwise falls back to
+`PyTorch + LoRA`.
+
+For RL reward experimentation, `src.training.train_rl(...)` accepts either:
+- a Python callable `reward(completion: str, maze: Maze) -> float`
+- an import string like `"my_rewards:shaped_reward"`
+
+This keeps reward design exposed for teaching notebooks without duplicating
+training logic across notebook cells.
+
 ## Setup
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
