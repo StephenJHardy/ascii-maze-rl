@@ -75,7 +75,7 @@ You should see ~85% on 3×3, ~30% on 4×4.
 
 ```bash
 uv run python -m src.dataset_builder \
-    --config data/train_grpo_exercise.config.json \
+    --config configs/train_grpo_exercise.config.json \
     --output data/train_grpo_exercise.jsonl
 ```
 
