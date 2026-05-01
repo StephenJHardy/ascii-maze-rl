@@ -1,0 +1,24 @@
+{
+  "name": "grpo_exercise",
+  "algorithm": "wilson",
+  "sizes": [
+    {
+      "width": 3,
+      "height": 3,
+      "count": 200,
+      "start_seed": 500000
+    },
+    {
+      "width": 4,
+      "height": 4,
+      "count": 400,
+      "start_seed": 510000
+    },
+    {
+      "width": 5,
+      "height": 5,
+      "count": 200,
+      "start_seed": 520000
+    }
+  ]
+}

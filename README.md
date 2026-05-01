@@ -1,7 +1,10 @@
 # ASCII Maze RL
 
 Training a small LLM to solve ASCII mazes using SFT and GRPO (Group Relative
-Policy Optimization). Runs entirely on a Mac laptop with Apple Silicon.
+Policy Optimization).
+
+**Workshop exercise:** See [EXERCISE.md](EXERCISE.md) for the guided exercise
+(Mac/Apple Silicon). For Colab/CUDA, see `notebooks/maze_grpo_workshop.ipynb`.
 
 See [doc/plan.md](doc/plan.md) for the full project plan, methodology, and
 results.
@@ -14,9 +17,21 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
-## Quick Start
+## Workshop Exercise (Mac)
 
-### 1. Generate data
+Follow [EXERCISE.md](EXERCISE.md) for the step-by-step guided exercise.
+The core flow:
+
+1. Download pre-trained SFT model
+2. Evaluate baseline performance
+3. Design a reward function (the main exercise)
+4. Run GRPO training
+5. Evaluate improvement
+6. Explore rollouts in the interactive viewer
+
+## Quick Start (Scripts)
+
+### Generate data
 
 ```bash
 # Base dataset (50K mazes, 3×3–9×9, ~10s)
@@ -26,12 +41,11 @@ uv run python -m src.dataset_builder
 uv run python -m src.make_eval_splits
 ```
 
-### 2. SFT training
+### SFT training
 
 ```bash
-# Train on the large dataset (7.5K examples, 3×3–7×7)
 uv run python -m src.train_sft \
-    --dataset data/train_large.jsonl \
+    --dataset data/base.jsonl \
     --val-dataset data/eval_full.jsonl \
     --iters 2000 \
     --batch-size 8 \
@@ -39,79 +53,68 @@ uv run python -m src.train_sft \
     --output-dir checkpoints/sft
 ```
 
-### 3. GRPO training
+### GRPO training
 
 ```bash
-# GRPO on top of an SFT checkpoint
+# GRPO on top of an SFT model
 uv run python -m src.train_grpo \
-    --adapters checkpoints/sft \
-    --dataset data/train_grpo_45.jsonl \
+    --model checkpoints/sft-mlx-bf16 \
+    --dataset data/train_grpo_exercise.jsonl \
     --max-steps 500 \
     --num-generations 8 \
     --temperature 1.0 \
-    --lr 5e-6 \
-    --beta 0.1 \
-    --max-tokens 40 \
+    --lr 1e-5 \
+    --beta 0.04 \
+    --max-tokens 30 \
     --output-dir checkpoints/grpo
 
 # Single-maze overfit test (quick pipeline validation)
-uv run python -m src.train_grpo --overfit --max-steps 200
+uv run python -m src.train_grpo --model checkpoints/sft-mlx-bf16 --overfit --max-steps 50
 ```
 
-### 4. Evaluate
+### Evaluate
 
 ```bash
-# Evaluate base model (no adapters)
+# Evaluate a model
 uv run python -m src.evaluate \
-    --dataset data/eval_full.jsonl
-
-# Evaluate an SFT or GRPO checkpoint
-uv run python -m src.evaluate \
-    --dataset data/eval_full.jsonl \
-    --adapters checkpoints/sft \
-    --output results/eval.json \
+    --model checkpoints/sft-mlx-bf16 \
+    --dataset data/eval_small.jsonl \
     --verbose
 
-# Options
-#   --temperature 0.0    greedy decoding (default, deterministic)
-#   --temperature 0.7    sample for diversity
-#   --samples 3          generate N completions per maze, take best
-#   --max-tokens 60      max completion length (increase for larger mazes)
-#   --limit 50           evaluate only first N mazes
+# Evaluate with GRPO adapters
+uv run python -m src.evaluate \
+    --model checkpoints/sft-mlx-bf16 \
+    --adapters checkpoints/grpo/step-500 \
+    --dataset data/eval_small.jsonl \
+    --verbose
 ```
 
-### 5. Visualize results
+### Visualize
 
 ```bash
-# Build an interactive HTML explorer from eval results
+# Build evaluation result viewer
 uv run python -m src.build_viewer \
     --results results/eval.json \
-    --dataset data/eval_full.jsonl \
+    --dataset data/eval_small.jsonl \
     --output results/viewer.html
 
-# Open in browser
-open results/viewer.html
+# Build rollout explorer (shows GRPO rollouts + advantages)
+uv run python -m src.build_rollout_viewer \
+    --rollouts results/rollouts.json \
+    --output results/rollout_viewer.html
 ```
-
-The viewer shows each maze with:
-- The correct solution path and the model's attempted path overlaid on the grid
-- Color-coded moves (green = valid, red = wall collision)
-- Reward breakdown, progress metrics, and raw model output
-- Filtering by size, solved/failed, and sorting by reward
 
 ## Other Utilities
 
 ```bash
-# Smoke test: verify MLX-Tune works on your Mac
+# Smoke test: verify MLX works on your Mac
 uv run python src/smoke_test.py
-uv run python src/smoke_test.py mlx-community/Qwen2.5-0.5B-Instruct-4bit
 
 # Maze census: enumerate unique mazes and solution length distributions
 uv run python -m src.maze_census
 
-# Write a custom dataset config, then generate from it
+# Generate data from a custom config
 uv run python -m src.dataset_builder --write-config data/my_config.json
-# (edit data/my_config.json)
 uv run python -m src.dataset_builder --config data/my_config.json
 ```
 
@@ -124,6 +127,11 @@ uv run pytest tests/ -v
 ## Project Structure
 
 ```
+EXERCISE.md             Guided workshop exercise (Mac)
+notebooks/
+  maze_sft_training.ipynb     SFT training (Colab/CUDA)
+  maze_grpo_h100.ipynb        H100 GRPO demo (projected)
+  maze_grpo_workshop.ipynb    T4/Colab participant exercise
 src/
   maze_gen.py           Maze generation (Wilson's algorithm) + solving (BFS)
   maze_repr.py          Expanded grid rendering, prompt formatting
@@ -136,6 +144,8 @@ src/
   train_sft.py          SFT LoRA fine-tuning (mlx-lm native trainer)
   train_grpo.py         Custom GRPO training loop (MLX)
   evaluate.py           Evaluation (solve rate by size/difficulty)
-  build_viewer.py       Build interactive HTML result explorer
+  rollout_capture.py    Capture GRPO rollouts for visualization
+  build_viewer.py       Build static eval result explorer
+  build_rollout_viewer.py  Build interactive rollout explorer
   smoke_test.py         Framework validation
 ```
