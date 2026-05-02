@@ -329,8 +329,10 @@ function renderDetail(d) {
   html += '3. <strong>Normalize</strong> rewards within the group: advantage = (reward - μ) / σ<br>';
   html += '&nbsp;&nbsp;&nbsp;μ = '+d.reward_mean.toFixed(3)+', σ = '+d.reward_std.toFixed(3)+'<br>';
   html += '4. <strong>Update</strong> policy: increase probability of high-advantage rollouts (⭐), decrease low-advantage ones<br>';
-  if (d.reward_std < 0.01) {
+  if (d.reward_std < 0.005) {
     html += '<br><span style="color:var(--red);">⚠ All rollouts scored the same — advantages are ~0 and GRPO learns nothing from this maze!</span>';
+  } else if (d.reward_std < 0.05) {
+    html += '<br><span style="color:var(--amber);">△ Very low reward variance (σ='+d.reward_std.toFixed(3)+') — weak learning signal.</span>';
   }
   html += '</p></div>';
 
