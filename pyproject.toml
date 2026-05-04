@@ -11,6 +11,8 @@ dependencies = [
     "numpy",
     "tqdm",
     "safetensors>=0.7.0",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
 ]
 
 [project.optional-dependencies]

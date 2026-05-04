@@ -702,7 +702,17 @@ ascii-maze-rl/
 │   ├── train_sft.py            # SFT LoRA fine-tuning (mlx-lm native trainer)
 │   ├── train_grpo.py           # Custom GRPO training loop (MLX)
 │   ├── evaluate.py             # Evaluation script (solve rate by size/difficulty)
-│   └── smoke_test.py           # Phase 0 framework validation
+│   ├── smoke_test.py           # Phase 0 framework validation
+│   ├── build_rollout_viewer.py # Interactive GRPO rollout explorer (HTML)
+│   ├── rollout_capture.py      # Capture rollout data for the viewer
+│   └── convert_adapter.py      # Convert CUDA adapters to MLX format
+├── notebooks/
+│   ├── maze_grpo_workshop.ipynb # T4/Colab GRPO workshop (5×5/6×6)
+│   ├── maze_grpo_mac.ipynb     # Mac/MLX GRPO workshop (3×3–5×5)
+│   ├── maze_grpo_h100.ipynb    # H100 GRPO on 8×8/9×9
+│   └── maze_sft_training.ipynb # SFT training (produces base models)
+├── configs/
+│   └── pregenerated_rollouts.json  # Pre-generated rollouts for reward exploration
 ├── data/                       # Generated datasets (gitignored, regenerable)
 ├── checkpoints/                # Model checkpoints (gitignored)
 ├── results/                    # Evaluation outputs
@@ -713,6 +723,8 @@ ascii-maze-rl/
 │   ├── test_reward.py
 │   ├── test_maze_dataset.py
 │   └── test_evaluate.py
+├── EXERCISE.md                 # Mac CLI exercise guide (legacy)
+├── mac_workshop.md             # Mac CLI workshop guide
 ├── pyproject.toml
 └── README.md
 ```
@@ -1053,14 +1065,18 @@ have room for GRPO improvement (~60-80% on 5×5, ~30-50% on 6×6).
 Three-tier workshop structure, all running the same core exercise
 (reward function design + GRPO rollout exploration) at different scales.
 
-**Notebooks:**
+**Notebooks & guides:**
 - `notebooks/maze_sft_training.ipynb` — SFT training (run once to
   produce base models for the workshop)
 - `notebooks/maze_grpo_h100.ipynb` — H100 GRPO on 8×8/9×9 (projected
   at front of room)
 - `notebooks/maze_grpo_workshop.ipynb` — T4/Colab GRPO on 5×5/6×6
   (participants on Windows/old Macs)
-- Mac participants use the MLX scripts directly (`src/train_grpo.py`)
+- `notebooks/maze_grpo_mac.ipynb` — Mac/MLX notebook mirroring the
+  Colab workshop flow: reward exploration with pre-generated rollouts,
+  MLX GRPO training, and evaluation
+- `mac_workshop.md` — command-line guide for Mac users who prefer
+  working outside notebooks (same exercise, same flow)
 
 **Pre-trained models on HuggingFace:**
 - `StephenJHardy/maze-cuda-sft-qwen2.5-0.5b` — strong SFT (100% to

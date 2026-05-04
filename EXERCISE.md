@@ -16,7 +16,7 @@ it further.
 ```bash
 git clone https://github.com/StephenJHardy/ascii-maze-rl.git
 cd ascii-maze-rl
-git checkout dev
+git checkout main
 uv sync
 ```
 
