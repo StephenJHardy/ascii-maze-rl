@@ -275,9 +275,8 @@ config = DatasetConfig(
     name='grpo_exercise',
     algorithm='wilson',
     sizes=[
-        SizeConfig(width=3, height=3, count=200, start_seed=500_000),
         SizeConfig(width=4, height=4, count=400, start_seed=510_000),
-        SizeConfig(width=5, height=5, count=200, start_seed=520_000),
+        SizeConfig(width=5, height=5, count=400, start_seed=520_000),
     ],
 )
 ds = MazeDataset.generate(config, progress=False)
