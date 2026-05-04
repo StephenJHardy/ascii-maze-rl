@@ -1021,35 +1021,79 @@ longer GRPO runs help on harder mazes where the model needs more exploration.
 5×5 regressed, consistent with the pattern of GRPO improving target sizes
 while regressing others it's not trained on.
 
-**3d: Further scaling (needs better hardware)**
-- [ ] More SFT iterations (val loss still declining at 5000)
-- [ ] More training data for 5×5+ (currently 2000 examples each)
-- [ ] Per-size GRPO (train each size independently to avoid regression)
-- [ ] Scale to Qwen2.5-1.5B for more capacity
-- [ ] Cloud GPU for faster iteration with TRL+vLLM
+**3d: CUDA/H100 SFT Results**
 
-### Phase 4: Analysis + Visualization (1 day)
+Trained SFT on H100 with TRL's SFTTrainer — 50K+ examples, bf16 precision,
+5000 steps with cosine LR schedule. Dramatically better than Mac 4-bit results.
 
-- [ ] Build a maze viewer that shows a specific maze, its solution, the
-      model's generated solution, and the reward breakdown
-- [ ] Analyze failure modes: does the model fail on long solutions? Complex
-      topology? Specific wall patterns?
-- [ ] Compare performance across maze sizes — find the model's capacity
-      ceiling
-- [ ] Save representative successes and failures for the project writeup
+| Size | Mac SFT (4-bit, 5Ki) | CUDA SFT (bf16, 5Ki/50K) |
+|------|---------------------|--------------------------|
+| 3×3  | 100%                | **100%**                 |
+| 4×4  | 88%                 | **100%**                 |
+| 5×5  | 32%                 | **100%**                 |
+| 6×6  | 13.3%               | **98%**                  |
+| 7×7  | 5%                  | **90%**                  |
+| 8×8  | —                   | **0%**                   |
+| 9×9  | —                   | **0%**                   |
+
+Key findings:
+- bf16 precision + more data effectively solves 3×3 through 7×7
+- Sharp cliff at 8×8: model outputs valid moves but hits walls after
+  4-8 steps. It understands the task but makes navigation errors at
+  decision points in larger mazes.
+- The 8×8 failure mode is ideal for GRPO: partial solutions with room
+  for improvement through exploration.
+
+**Separate Colab SFT model:** A less-trained checkpoint will be pushed
+to HuggingFace for T4 participants, with SFT quality tuned so 5×5/6×6
+have room for GRPO improvement (~60-80% on 5×5, ~30-50% on 6×6).
+
+### Phase 4: Workshop Setup
+
+Three-tier workshop structure, all running the same core exercise
+(reward function design + GRPO rollout exploration) at different scales.
+
+**Notebooks:**
+- `notebooks/maze_sft_training.ipynb` — SFT training (run once to
+  produce base models for the workshop)
+- `notebooks/maze_grpo_h100.ipynb` — H100 GRPO on 8×8/9×9 (projected
+  at front of room)
+- `notebooks/maze_grpo_workshop.ipynb` — T4/Colab GRPO on 5×5/6×6
+  (participants on Windows/old Macs)
+- Mac participants use the MLX scripts directly (`src/train_grpo.py`)
+
+**Pre-trained models on HuggingFace:**
+- `StephenJHardy/maze-cuda-sft-qwen2.5-0.5b` — strong SFT (100% to
+  7×7, 0% on 8×8) for H100 GRPO
+- A separate Colab-specific model tuned for T4 performance on 5×5/6×6
+
+**Workshop flow:**
+1. Intro: show the maze format, the SFT baseline, what the model can/can't do
+2. Exercise: design a reward function (start with binary → iterate to partial credit)
+3. Run GRPO with their reward function (~8-10 min per run)
+4. Explore rollouts in the viewer — see which rollouts GRPO reinforces
+5. Iterate on reward function, observe improvements
+6. Discussion: GRPO's group-relative advantages vs value models, credit
+   assignment challenges
+
+**Visualization tools:**
+- [x] `src/build_viewer.py` — static eval result explorer
+- [x] `src/build_rollout_viewer.py` — GRPO rollout explorer with:
+  - All G rollouts per maze, side by side
+  - Step-by-step path animation through the maze
+  - Advantage visualization (which rollouts GRPO reinforces)
+  - Reward decomposition (coverage, progress, valid steps)
+  - GRPO mechanism explanation per maze
+- [x] `src/rollout_capture.py` — captures full rollout data for the viewer
 
 ### Phase 5: Extensions (optional)
 
-- [ ] Scale to Qwen2.5-1.5B-Instruct (same architecture, more capacity)
-- [ ] Curriculum learning — automated difficulty scheduling based on
-      current solve rate per size
-- [ ] KL penalty tuning — the current implementation doesn't use the
-      clipped ratio or KL penalty from full GRPO; adding these may
-      improve stability
-- [ ] Alternative RL algorithms (REINFORCE baseline, PPO with value head)
-- [ ] Cloud GPU run with TRL + vLLM for faster iteration at scale
-- [ ] Investigate Qwen3.5 for inference-only evaluation (compare base
-      model capabilities even though it can't be LoRA-trained on MLX)
+- [ ] Scale to Qwen2.5-1.5B-Instruct (more capacity for 8×8/9×9)
+- [ ] Per-size GRPO to avoid cross-size regression
+- [ ] Value model comparison — implement PPO with a value head to
+      demonstrate per-token credit assignment vs GRPO's sequence-level
+- [ ] Curriculum learning — automated difficulty scheduling
+- [ ] Longer GRPO runs on H100 for 8×8/9×9 convergence
 
 ---
 
