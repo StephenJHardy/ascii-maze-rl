@@ -17,43 +17,15 @@ cd ascii-maze-rl
 uv sync
 ```
 
-## Step 1: Download the Pre-trained SFT Model
+## Step 1: Download & Convert the Pre-trained Model
 
-The base model is `mlx-community/Qwen2.5-0.5B-Instruct-4bit` (4-bit
-quantized, fits in Apple Silicon unified memory). The SFT adapter was
-trained on Mac with MLX and published to HuggingFace in PEFT format.
-
-Download and convert the adapter to MLX LoRA format:
+The SFT model was trained on CUDA and published to HuggingFace. Convert
+it to MLX format (~30 seconds, one-time):
 
 ```bash
-uv run python -c "
-from pathlib import Path
-from huggingface_hub import hf_hub_download
-from safetensors.numpy import load_file, save_file
-
-adapter_dir = Path('checkpoints/sft-adapter')
-adapter_dir.mkdir(parents=True, exist_ok=True)
-
-# Download PEFT adapter
-peft_path = hf_hub_download('StephenJHardy/maze-sft-qwen2.5-0.5b', 'adapter_model.safetensors')
-peft_weights = load_file(peft_path)
-
-# Convert PEFT -> MLX: transpose weights, fix key names
-mlx_weights = {}
-for key, value in peft_weights.items():
-    mlx_key = key.replace('base_model.model.model.layers.', 'model.layers.')
-    mlx_key = mlx_key.replace('.lora_A.weight', '.lora_a')
-    mlx_key = mlx_key.replace('.lora_B.weight', '.lora_b')
-    mlx_weights[mlx_key] = value.T
-
-save_file(mlx_weights, str(adapter_dir / 'adapters.safetensors'))
-print(f'Converted {len(peft_weights)} weights -> {adapter_dir}')
-
-# Cache the base model
-from mlx_lm import load
-load('mlx-community/Qwen2.5-0.5B-Instruct-4bit')
-print('Base model cached.')
-"
+uv run mlx_lm.convert \
+    --hf-path StephenJHardy/maze-cuda-sft-5000-qwen2.5-0.5b \
+    --mlx-path checkpoints/sft-mlx-bf16
 ```
 
 ## Step 2: Explore the Maze Format
@@ -91,15 +63,14 @@ Generate eval data and check how the model performs before GRPO:
 ```bash
 uv run python -m src.make_eval_splits
 uv run python -m src.evaluate \
-    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
-    --adapters checkpoints/sft-adapter \
+    --model checkpoints/sft-mlx-bf16 \
     --dataset data/eval_small.jsonl \
     --temperature 0.0 \
     --max-tokens 40 \
     --verbose
 ```
 
-Expected results: ~100% on 3×3, ~88% on 4×4, ~32% on 5×5.
+Expected results: ~80% on 3×3, ~30% on 4×4.
 
 ## Step 4: Explore Reward Functions with Pre-generated Rollouts ⭐
 
@@ -194,7 +165,7 @@ progress = manhattan_progress(path[-1], maze.exit, maze.entry)
 **v4 — BFS distance (best):**
 Use `solve()` from `src.maze_gen` to compute actual maze distance
 from the model's final position to the exit. See the full solution
-in `src/reward.py` or `EXERCISE.md`.
+in `src/reward.py`.
 
 Re-run the scoring script after each edit to check how your changes
 affect variance and signal quality. **No training needed for this step.**
@@ -289,8 +260,7 @@ print(ds.summary())
 
 ```bash
 uv run python -m src.train_grpo \
-    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
-    --adapters checkpoints/sft-adapter \
+    --model checkpoints/sft-mlx-bf16 \
     --dataset data/train_grpo_exercise.jsonl \
     --max-steps 500 \
     --num-generations 8 \
@@ -310,7 +280,7 @@ This takes ~15-20 minutes on Apple Silicon. Watch the logs:
 
 ```bash
 uv run python -m src.evaluate \
-    --model mlx-community/Qwen2.5-0.5B-Instruct-4bit \
+    --model checkpoints/sft-mlx-bf16 \
     --adapters checkpoints/grpo-exercise/step-500 \
     --dataset data/eval_small.jsonl \
     --temperature 0.0 \

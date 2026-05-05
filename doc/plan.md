@@ -723,7 +723,6 @@ ascii-maze-rl/
 │   ├── test_reward.py
 │   ├── test_maze_dataset.py
 │   └── test_evaluate.py
-├── EXERCISE.md                 # Mac CLI exercise guide (legacy)
 ├── mac_workshop.md             # Mac CLI workshop guide
 ├── pyproject.toml
 └── README.md
